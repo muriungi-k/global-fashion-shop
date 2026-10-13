@@ -1,0 +1,36 @@
+import {spawn} from 'node:child_process';
+import {writeFileSync} from 'node:fs';
+import {DatabaseSync} from 'node:sqlite';
+import assert from 'node:assert/strict';
+const browser=spawn('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',['--headless','--disable-gpu','--disable-background-networking','--disable-extensions','--disable-sync','--use-mock-keychain','--password-store=basic','--no-first-run','--no-default-browser-check','--user-data-dir=/private/tmp/global-fashion-cdp','--remote-debugging-port=9222','about:blank'],{stdio:['ignore','ignore','pipe']});
+let socket;
+const delay=ms=>new Promise(r=>setTimeout(r,ms));
+try{const wsUrl=await new Promise((resolve,reject)=>{let text='';const timeout=setTimeout(()=>reject(new Error('Browser startup timeout')),20000);browser.stderr.on('data',chunk=>{text+=chunk;const match=text.match(/DevTools listening on (ws:\/\/[^\s]+)/);if(match){clearTimeout(timeout);resolve(match[1])}});browser.once('exit',()=>reject(new Error('Browser stopped')))});socket=new WebSocket(wsUrl);await new Promise((resolve,reject)=>{socket.onopen=resolve;socket.onerror=reject});let next=0;const pending=new Map();const errors=[];socket.onmessage=e=>{const msg=JSON.parse(e.data);if(msg.id){const p=pending.get(msg.id);if(p){pending.delete(msg.id);msg.error?p.reject(new Error(msg.error.message)):p.resolve(msg.result)}}if(msg.method==='Runtime.exceptionThrown')errors.push(msg.params.exceptionDetails.text+' '+JSON.stringify(msg.params.exceptionDetails.exception?.description));};
+const send=(method,params={},sessionId)=>new Promise((resolve,reject)=>{const id=++next;pending.set(id,{resolve,reject});socket.send(JSON.stringify({id,method,params,sessionId}))});
+const {targetId}=await send('Target.createTarget',{url:'about:blank'});const {sessionId}=await send('Target.attachToTarget',{targetId,flatten:true});const call=(m,p)=>send(m,p,sessionId);await call('Page.enable');await call('Runtime.enable');
+for(const [name,width,height,url] of [['home-mobile',390,844,'/'],['home-desktop',1440,1000,'/'],['shop-desktop',1440,1000,'/shop'],['login-mobile',390,844,'/login']]){await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:width<500});await call('Page.navigate',{url:'http://127.0.0.1:5173'+url});await delay(3500);const result=await call('Runtime.evaluate',{expression:`JSON.stringify({width:innerWidth,scroll:document.documentElement.scrollWidth,body:document.body.clientWidth,images:[...document.images].filter(i=>i.complete&&!i.naturalWidth).map(i=>i.alt),overflow:[...document.querySelectorAll('body *')].filter(e=>e.getBoundingClientRect().right>innerWidth+3&&getComputedStyle(e).position!=='absolute'&&getComputedStyle(e).position!=='fixed').slice(0,15).map(e=>({tag:e.tagName,cls:e.className,width:e.getBoundingClientRect().width,right:e.getBoundingClientRect().right}))})`,returnByValue:true});console.log(name,result.result.value);const png=await call('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});writeFileSync('outputs/'+name+'.png',Buffer.from(png.data,'base64'));}
+const evaluate=async expression=>(await call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true})).result.value;
+const click=async expression=>{await evaluate(expression);await delay(600)};
+const fill=async(name,value)=>evaluate(`(()=>{const input=document.querySelector('[name="${name}"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,${JSON.stringify(value)});input.dispatchEvent(new Event('input',{bubbles:true}));return true})()`);
+await call('Page.navigate',{url:'http://127.0.0.1:5173/product/classic-shirt'});await delay(1200);
+await click(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent.includes('Add to bag')).click()`);
+assert((await evaluate('document.body.innerText')).includes('Added to your bag'));
+await click(`document.querySelector('header a[href="/cart"]').click()`);
+assert((await evaluate('document.body.innerText')).includes('Classic Fit Shirt'));
+await evaluate(`(()=>{const input=document.querySelector('#coupon');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'WELCOME10');input.dispatchEvent(new Event('input',{bubbles:true}))})()`);
+await click(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Apply').click()`);
+assert((await evaluate('document.body.innerText')).includes('Welcome discount'));
+await click(`document.querySelector('a[href="/checkout"]').click()`);
+await click(`document.querySelector('a[href="/signup?next=/checkout"]').click()`);
+await fill('name','Browser QA');await fill('email','browser.qa@example.invalid');await fill('password','temporary-browser-qa-123');
+await click(`document.querySelector('form.auth-card').requestSubmit()`);await delay(1500);
+assert((await evaluate('location.pathname'))==='/checkout');
+for(const [name,value] of [['phone','0700000000'],['country','Kenya'],['address','QA Test Address'],['city','Nairobi']])await fill(name,value);
+await click(`document.querySelector('.checkout-form input[type="checkbox"]').click()`);
+await click(`document.querySelector('form.checkout-form').requestSubmit()`);await delay(1200);
+assert((await evaluate('location.pathname')).startsWith('/order-confirmation/'));
+assert((await evaluate('document.body.innerText')).includes('Cash on delivery'));
+await evaluate(`fetch('/api/store',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'logout'})})`);
+console.log('PASS: browser product selection, add to bag, cart navigation, discount application, registration, checkout, and order confirmation.');
+console.log('Browser errors:',JSON.stringify(errors));assert.equal(errors.length,0);await send('Browser.close');
+const db=new DatabaseSync('.local-preview/store.sqlite');const customer=db.prepare('SELECT id FROM users WHERE email=?').get('browser.qa@example.invalid');if(customer){for(const row of db.prepare('SELECT data FROM orders WHERE user_id=?').all(customer.id)){const order=JSON.parse(row.data);for(const i of order.items)db.prepare("UPDATE products SET data=json_set(data,'$.stock',json_extract(data,'$.stock')+?) WHERE id=?").run(i.qty,i.id)}db.prepare('DELETE FROM orders WHERE user_id=?').run(customer.id);db.prepare('DELETE FROM sessions WHERE user_id=?').run(customer.id);db.prepare('DELETE FROM users WHERE id=?').run(customer.id)}db.close();}finally{socket?.close();browser.kill('SIGTERM')}

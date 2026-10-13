@@ -1,0 +1,31 @@
+// Portable Node preview uses the same UI and API source, with a SQLite D1 adapter.
+// Hosted deployments continue to use the Cloudflare/Vinext build.
+import {createServer} from 'node:http';
+import {DatabaseSync} from 'node:sqlite';
+import {readFileSync,writeFileSync,mkdirSync,readdirSync,existsSync} from 'node:fs';
+import {spawnSync} from 'node:child_process';
+import {pathToFileURL} from 'node:url';
+import path from 'node:path';
+import ts from 'typescript';
+import React from 'react';
+import {renderToString} from 'react-dom/server';
+const root=process.cwd(),dir=path.join(root,'.local-preview');mkdirSync(dir,{recursive:true});
+const compile=s=>ts.transpileModule(s,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext,jsx:ts.JsxEmit.ReactJSX}}).outputText;
+writeFileSync(path.join(dir,'catalog.mjs'),compile(readFileSync('lib/catalog.ts','utf8')));
+writeFileSync(path.join(dir,'store.mjs'),compile(readFileSync('app/store.tsx','utf8')).replace(/['"]\.\.\/lib\/catalog['"]/,"'./catalog.mjs'"));
+writeFileSync(path.join(dir,'api.mjs'),compile(readFileSync('app/api/store/route.ts','utf8')).replace(/import \{ env \} from ['"]cloudflare:workers['"];?/,'const {env}=globalThis.__gfPreview;').replace(/['"]\.\.\/\.\.\/\.\.\/lib\/catalog['"]/,"'./catalog.mjs'"));
+writeFileSync(path.join(dir,'client.tsx'),"import React from 'react';import {hydrateRoot} from 'react-dom/client';import Store from '../app/store';hydrateRoot(document.getElementById('root')!,<Store initialPath={location.pathname}/>);");
+const build=spawnSync(process.execPath,['node_modules/vite/bin/vite.js','build','--config','scripts/preview.vite.config.mjs'],{stdio:'inherit'});if(build.status!==0)process.exit(build.status||1);
+let password=process.env.ADMIN_PASSWORD;
+if(!password){if(process.stdin.isTTY)process.stdin.setRawMode(true);process.stdout.write('Ready for preview configuration on stdin (input is hidden).\n');password=await new Promise((resolve,reject)=>{let input='';process.stdin.on('data',chunk=>{input+=chunk.toString();if(input.includes('\n')){try{resolve(JSON.parse(input.trim()).adminPassword)}catch(e){reject(e)}process.stdin.pause();if(process.stdin.isTTY)process.stdin.setRawMode(false)}});process.stdin.resume()});}
+if(typeof password!=='string'||password.length<8)throw new Error('Provide a strong administrator password through ADMIN_PASSWORD or stdin configuration.');
+const sqlite=new DatabaseSync(path.join(dir,'store.sqlite'));sqlite.exec('CREATE TABLE IF NOT EXISTS preview_migrations (name TEXT PRIMARY KEY)');
+for(const file of readdirSync('drizzle').filter(f=>f.endsWith('.sql')).sort()){if(!sqlite.prepare('SELECT name FROM preview_migrations WHERE name=?').get(file)){sqlite.exec('BEGIN');try{for(const sql of readFileSync('drizzle/'+file,'utf8').split('--> statement-breakpoint'))sqlite.exec(sql);sqlite.prepare('INSERT INTO preview_migrations (name) VALUES (?)').run(file);sqlite.exec('COMMIT')}catch(e){sqlite.exec('ROLLBACK');throw e}}}
+let transaction=Promise.resolve();
+const db={prepare(sql){let args=[];const s={bind(...a){args=a;return s},async first(){return sqlite.prepare(sql).get(...args)||null},async all(){return {results:sqlite.prepare(sql).all(...args)}},async run(){const r=sqlite.prepare(sql).run(...args);return {meta:{changes:Number(r.changes)}}}};return s},batch(statements){const result=transaction.then(async()=>{sqlite.exec('BEGIN');try{const results=[];for(const s of statements)results.push(await s.run());sqlite.exec('COMMIT');return results}catch(e){sqlite.exec('ROLLBACK');throw e}});transaction=result.catch(()=>{});return result}};
+globalThis.__gfPreview={env:{DB:db,ADMIN_PASSWORD:password}};
+const {GET,POST}=await import(pathToFileURL(path.join(dir,'api.mjs')));const {default:Store}=await import(pathToFileURL(path.join(dir,'store.mjs')));
+const css=readFileSync('app/globals.css','utf8');
+const server=createServer(async(req,res)=>{try{const url=new URL(req.url||'/','http://127.0.0.1:5173');if(url.pathname==='/api/store'){let body='';for await(const chunk of req){body+=chunk.toString();if(Buffer.byteLength(body)>65536){res.writeHead(413);res.end('Request too large');return}}const request=new Request(url,{method:req.method,headers:req.headers,...(body?{body}:{})});const response=await(req.method==='POST'?POST:GET)(request);res.writeHead(response.status,Object.fromEntries(response.headers));res.end(await response.text());return}if(url.pathname.startsWith('/preview-assets/')){const file=path.resolve(dir,'client',url.pathname.slice('/preview-assets/'.length));if(!file.startsWith(path.join(dir,'client')+path.sep)||!existsSync(file)){res.writeHead(404);res.end();return}res.setHeader('Content-Type',file.endsWith('.js')?'application/javascript':file.endsWith('.css')?'text/css':'application/octet-stream');res.end(readFileSync(file));return}if(url.pathname.startsWith('/images/')){const file=path.resolve(root,'public',url.pathname.slice(1));if(!file.startsWith(path.join(root,'public','images')+path.sep)||!existsSync(file)){res.writeHead(404);res.end('Image not found');return}res.setHeader('Content-Type',file.endsWith('.webp')?'image/webp':file.endsWith('.jpg')?'image/jpeg':'image/png');res.setHeader('Cache-Control','public, max-age=3600');res.end(readFileSync(file));return}if(url.pathname==='/favicon.svg'){res.setHeader('Content-Type','image/svg+xml');res.end(readFileSync('public/favicon.svg'));return}res.setHeader('Content-Type','text/html; charset=utf-8');res.setHeader('Cache-Control','no-store');res.end('<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Global Fashion — Wear a Better You</title><link rel="icon" href="/favicon.svg"><style>'+css+'</style></head><body><div id="root">'+renderToString(React.createElement(Store,{initialPath:url.pathname}))+'</div><script type="module" src="/preview-assets/client.js"></script></body></html>')}catch(e){console.error('Preview request failed:',e.message);res.writeHead(500);res.end('Preview service error')}});
+server.listen(5173,'127.0.0.1',()=>console.log('Local: http://127.0.0.1:5173'));
+const close=()=>server.close(()=>{sqlite.close();process.exit(0)});process.on('SIGINT',close);process.on('SIGTERM',close);

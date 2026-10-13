@@ -1,0 +1,4 @@
+# Men’s collection — user reference override
+Black, ivory and muted gold. Bold condensed uppercase hero headline; italic serif supporting line. Dark navigation with centered store brand and Men’s Collection subtitle. Angular image panel, asymmetric featured collections, clean product rows, dark collection and benefits strips, and warm editorial story band. Keep real store shipping/payment terms. Use only products explicitly categorised Men and typed as clothing; never substring-match gender categories. Restrict men’s product recommendations and men’s header searches to men’s clothing. No invented customer reviews. Stock photos illustrate the supplied screenshot’s layout.
+
+Navigation override: use the main store’s white header with Home, Shop, Men, Women, Collections, Offers, About us, Contact, search, account, wishlist and bag. Highlight Men. This replaces the previous black, centered collection header. Preserve men-scoped search.

@@ -1,0 +1,4 @@
+# Women’s collection
+Apply the established men’s collection layout to women: black navigation and hero, warm ivory surfaces, muted gold accents, angular editorial photography, featured collection tiles, new arrivals, essentials, story section, and clothing filters. Use women’s imagery and copy. Include only explicitly categorised Women products with clothing types; restrict recommendations and section searches to women’s clothing. Featured collections: tailored layers, everyday essentials, knitwear, dresses. Match actual store shipping and payment terms. No fabricated customer reviews.
+
+Navigation override: use the shared white main-store navigation with the serif Global Fashion logo, Wear a Better You tagline, full menu, search, account, wishlist and shopping bag. Highlight Women and retain women-only search. Replaces the dark collection header.

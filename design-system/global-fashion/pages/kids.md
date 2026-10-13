@@ -1,0 +1,2 @@
+# Kids collection
+White shared header, sage hero, ivory studio garment images, serif headline and rounded cards. Explicit Boys and Girls groups; shared kids essentials can appear in both. Kids clothing only, no adult items or accessories. Age-based sizes and same-audience recommendations. Boys/Girls/All audience is editable in admin. New AI-generated child-sized garments are illustrative sample catalogue entries.
