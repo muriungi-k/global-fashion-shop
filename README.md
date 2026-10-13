@@ -42,3 +42,15 @@ Apply both generated migrations when setting up local D1: `0000_young_jack_power
 ## Kids and Unisex collections
 
 Kids has separate Boys and Girls pages, shared kids essentials, age sizes from 2–3Y to 10–11Y, and an editable audience field in admin. Unisex contains clothing only. Shoes, hats, sunglasses and bags stay in their respective product categories. Four new AI-generated kids garment photographs are stored under public/images/ai/; prompts are recorded in design-system/global-fashion/kids-image-prompts.md. New product records remain sample launch inventory.
+
+## Deploy from GitHub to Cloudflare
+
+The `Deploy Global Fashion` GitHub Actions workflow builds the complete shop, applies D1 migrations, and deploys the Worker and static assets. It runs on pushes to `main` and can be started manually. It stays skipped until the database variable is configured.
+
+1. Create a Cloudflare account and a D1 database named `global-fashion-shop`. Copy its database ID and your account ID.
+2. Create a Cloudflare API token scoped to your account with Workers Scripts Edit and D1 Edit permissions. Store it in GitHub; do not commit it.
+3. In this repository's Settings → Secrets and variables → Actions, add repository secrets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and `ADMIN_PASSWORD`. Use your chosen administrator password. Administrator email is `admin@globalfashion.com`.
+4. In the Variables tab, add `CLOUDFLARE_D1_DATABASE_ID` with your D1 database ID.
+5. Open Actions → Deploy Global Fashion → Run workflow. The deployment log prints your `workers.dev` website URL. Share that URL with visitors. Future pushes to `main` redeploy automatically.
+
+This creates a separate production database; local customer test records are not uploaded. Payment remains cash on delivery. Outgoing email and online payment services require separate integrations. Cloudflare account limits and billing apply.

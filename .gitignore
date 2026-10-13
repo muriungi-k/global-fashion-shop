@@ -61,3 +61,6 @@ next-env.d.ts
 
 # Persistent local preview database and generated client
 /.local-preview/
+
+# Generated deployment configuration
+/.cloudflare/
